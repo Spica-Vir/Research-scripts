@@ -4,55 +4,58 @@ import argparse
 import numpy as np
 
 from pymatgen.core import Structure
-from pymatgen.io.vasp import Poscar
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Apply strain to a VASP POSCAR file"
-    )
-    parser.add_argument("input", help="Input POSCAR file")
-    parser.add_argument(
-        "strain",
-        nargs="+",
-        type=float,
-        help="Provide 1, 3, or 9 strain values",
-    )
-    parser.add_argument(
-        "-o",
-        "--output",
-        default="POSCAR_strained",
-        help="Output POSCAR filename",
-    )
-
+    parser = argparse.ArgumentParser()
+    parser.add_argument("input", help="Input POSCAR")
+    parser.add_argument("strain", nargs="+", type=float)
+    parser.add_argument("-o", "--output", default="POSCAR_strained")
     args = parser.parse_args()
-    values = np.array(args.strain, dtype=float)
+
+    values = np.asarray(args.strain, dtype=float)
 
     if len(values) == 1:
-        # Uniform strain
         strain_tensor = np.eye(3) * values[0]
-
     elif len(values) == 3:
-        # Axial strains: exx, eyy, ezz
         strain_tensor = np.diag(values)
-
     elif len(values) == 9:
-        # Full strain tensor, row by row
-        strain_tensor = values.reshape((3, 3))
-
+        strain_tensor = values.reshape(3, 3)
     else:
         parser.error("Provide exactly 1, 3, or 9 strain values.")
 
+    # Read the structure with pymatgen and apply the strain
     structure = Structure.from_file(args.input)
-
-    # Supported by older and newer pymatgen versions
     strained_structure = structure.copy()
     strained_structure.apply_strain(strain_tensor, inplace=True)
 
-    Poscar(strained_structure, sort_structure=False).write_file(args.output)
+    # Read the original POSCAR text.
+    # This preserves duplicate species blocks such as Co Co.
+    with open(args.input, "r") as f:
+        lines = f.readlines()
+
+    if len(lines) < 5:
+        raise ValueError("Input file is not a valid POSCAR.")
+
+    # POSCAR lattice vectors occupy lines 3--5.
+    # Set scale to 1.0 because the vectors below are absolute.
+    lines[1] = "1.0\n"
+
+    lattice = strained_structure.lattice.matrix
+
+    for i in range(3):
+        lines[2 + i] = (
+            f"{lattice[i, 0]:20.16f}"
+            f"{lattice[i, 1]:20.16f}"
+            f"{lattice[i, 2]:20.16f}\n"
+        )
+
+    with open(args.output, "w") as f:
+        f.writelines(lines)
 
     print(f"Strained POSCAR written to: {args.output}")
 
 
 if __name__ == "__main__":
     main()
+
